@@ -1,0 +1,6 @@
+user_id,age,country,account_type,avg_transaction_amount
+101,28,IN,STANDARD,2500
+102,45,US,PREMIUM,8000
+103,35,IN,STANDARD,3000
+104,60,UK,PREMIUM,12000
+105,50,AE,PREMIUM,15000
