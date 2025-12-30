@@ -1,68 +1,72 @@
-from pyspark.sql.functions import col, when, lit
+from pyspark.sql.functions import col, avg
+from pyspark.sql.window import Window
+
 from src.utils.spark_session import get_spark_session
 
 
-# ----------------------------
-# Paths & Config
-# ----------------------------
+# Paths
 SILVER_PATH = "data/silver/transactions"
 GOLD_PATH = "data/gold/fraud_alerts"
 CHECKPOINT_PATH = "data/gold/checkpoints"
 
-HIGH_VALUE_THRESHOLD = 50000
 
-
-# ----------------------------
-# Main Fraud Detection Job
-# ----------------------------
 def main():
-    spark = get_spark_session("SilverToGoldFraudDetection")
+    spark = get_spark_session("SilverToGoldFraud")
 
-    # Read Silver data as stream
+    # --------------------------------------------------
+    # IMPORTANT:
+    # Streaming file sources REQUIRE an explicit schema
+    # --------------------------------------------------
+
+    # Read schema from existing Silver data (batch read)
+    silver_schema = spark.read.parquet(SILVER_PATH).schema
+
+    # Read Silver layer as STREAM using predefined schema
     silver_df = (
         spark.readStream
+        .schema(silver_schema)
         .parquet(SILVER_PATH)
     )
 
-    # ----------------------------
-    # Fraud Rules
-    # ----------------------------
+    # --------------------------------------------------
+    # Fraud detection logic
+    # --------------------------------------------------
+
+    window_spec = Window.partitionBy("user_id")
 
     fraud_df = (
         silver_df
         .withColumn(
-            "is_amount_anomaly",
-            col("amount") > (col("avg_transaction_amount") * 3)
+            "avg_transaction_amount",
+            avg("amount").over(window_spec)
         )
         .withColumn(
             "is_high_value",
-            col("amount") > lit(HIGH_VALUE_THRESHOLD)
+            col("amount") > 50000
         )
         .withColumn(
-            "is_location_mismatch",
-            col("location") != col("country")
+            "is_amount_anomaly",
+            col("amount") > col("avg_transaction_amount") * 3
         )
         .withColumn(
             "is_fraud",
-            when(
-                col("is_amount_anomaly") |
-                col("is_high_value") |
-                col("is_location_mismatch"),
-                lit(True)
-            ).otherwise(lit(False))
+            col("is_high_value") | col("is_amount_anomaly")
         )
+        .filter(col("is_fraud") == True)
     )
 
-    # Filter only fraud cases
-    fraud_alerts_df = fraud_df.filter(col("is_fraud") == True)
+    # --------------------------------------------------
+    # Write to Gold layer (STREAMING)
+    # --------------------------------------------------
 
-    # Write to Gold layer
     query = (
-        fraud_alerts_df.writeStream
-        .format("parquet")   # can switch to Delta later
+        fraud_df
+        .writeStream
+        .format("parquet")
         .outputMode("append")
+        .option("path", GOLD_PATH)
         .option("checkpointLocation", CHECKPOINT_PATH)
-        .start(GOLD_PATH)
+        .start()
     )
 
     print("Silver → Gold fraud detection started...")
@@ -71,3 +75,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
