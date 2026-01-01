@@ -1,7 +1,10 @@
-from pyspark.sql.functions import col, avg
+from pyspark.sql.functions import col, avg, stddev, count, when, current_timestamp
 from pyspark.sql.window import Window
 
 from src.utils.spark_session import get_spark_session
+from src.fraud.fraud_rules import apply_advanced_fraud_detection
+from src.alerting.alert_system import apply_business_intelligence_enhancements, FinancialAlertSystem
+from src.dashboard.dashboard_generator import create_business_intelligence_pipeline, calculate_financial_kpis
 
 
 # Paths
@@ -29,31 +32,29 @@ def main():
     )
 
     # --------------------------------------------------
-    # Fraud detection logic
+    # Read static user profile data (batch) for enrichment
     # --------------------------------------------------
-
-    window_spec = Window.partitionBy("user_id")
-
-    fraud_df = (
-        silver_df
-        .withColumn(
-            "avg_transaction_amount",
-            avg("amount").over(window_spec)
-        )
-        .withColumn(
-            "is_high_value",
-            col("amount") > 50000
-        )
-        .withColumn(
-            "is_amount_anomaly",
-            col("amount") > col("avg_transaction_amount") * 3
-        )
-        .withColumn(
-            "is_fraud",
-            col("is_high_value") | col("is_amount_anomaly")
-        )
-        .filter(col("is_fraud") == True)
+    users_df = (
+        spark.read
+        .option("header", "true")
+        .option("inferSchema", "true")
+        .csv("data/user_profiles.csv")
     )
+
+    # --------------------------------------------------
+    # Advanced fraud detection logic
+    # --------------------------------------------------
+    fraud_df = apply_advanced_fraud_detection(silver_df, users_df)
+    
+    # --------------------------------------------------
+    # Apply business intelligence enhancements
+    # --------------------------------------------------
+    fraud_df = apply_business_intelligence_enhancements(fraud_df)
+    
+    # --------------------------------------------------
+    # Initialize alert system
+    # --------------------------------------------------
+    alert_system = FinancialAlertSystem()
 
     # --------------------------------------------------
     # Write to Gold layer (STREAMING)

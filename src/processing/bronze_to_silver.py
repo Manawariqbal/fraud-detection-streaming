@@ -4,6 +4,7 @@ from pyspark.sql.types import (
     StringType, IntegerType, DoubleType, TimestampType
 )
 from src.utils.spark_session import get_spark_session
+from src.processing.silver_enrichment import enrich_transaction_data
 
 
 # ----------------------------
@@ -48,11 +49,8 @@ def main():
         .parquet(BRONZE_PATH)
     )
 
-    # Enrich transactions
-    silver_df = (
-        bronze_df
-        .join(users_df, on="user_id", how="left")
-    )
+    # Enrich transactions with enhanced financial indicators
+    silver_df = enrich_transaction_data(bronze_df, users_df)
 
     # Write to Silver layer
     query = (
